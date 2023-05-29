@@ -1,16 +1,13 @@
 package chatroom
 
 import (
-	"fmt"
+	"context"
 	"log"
-	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // Define the ChatMessage struct
@@ -38,11 +35,14 @@ type WebSocketMessage struct {
 	Message string `json:"message"`
 }
 
-var upgrader = websocket.Upgrader{
+var (
+	upgrader = websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
 	}
-
+	connectionsByRoom = make(map[string]map[*websocket.Conn]bool)
+	connectionsLock   sync.Mutex
+)
 
 func HandleWebSocket(c *gin.Context) {
 	roomID := c.Param("roomID")
@@ -54,25 +54,20 @@ func HandleWebSocket(c *gin.Context) {
 		return
 	}
 
+	// Register the WebSocket connection
+	registerConnection(roomID, conn)
+
+	defer func() {
+		// Clean up the WebSocket connection when the goroutine exits
+		unregisterConnection(roomID, conn)
+		conn.Close()
+	}()
+
 	// Create a new goroutine to handle the WebSocket connection
 	go handleChat(conn, roomID, userID)
 }
 
 func handleChat(conn *websocket.Conn, roomID, userID string) {
-	// Register the WebSocket connection
-	// You can use a map to store all active connections for each room
-	// For simplicity, this example uses a single global map
-	// Consider using a more robust solution for production
-	connections := make(map[string]*websocket.Conn)
-
-	connections[userID] = conn
-
-	defer func() {
-		// Clean up the WebSocket connection when the goroutine exits
-		delete(connections, userID)
-		conn.Close()
-	}()
-
 	// Read messages from the WebSocket connection
 	for {
 		var msg WebSocketMessage
@@ -98,19 +93,44 @@ func handleChat(conn *websocket.Conn, roomID, userID string) {
 		}
 
 		// Broadcast the message to all connected clients in the same room
-		broadcastMessage(connections, roomID, chatMessage)
+		broadcastMessage(roomID, chatMessage)
+	}
+}
+
+func registerConnection(roomID string, conn *websocket.Conn) {
+	connectionsLock.Lock()
+	defer connectionsLock.Unlock()
+
+	if connectionsByRoom[roomID] == nil {
+		connectionsByRoom[roomID] = make(map[*websocket.Conn]bool)
+	}
+
+	connectionsByRoom[roomID][conn] = true
+}
+
+func unregisterConnection(roomID string, conn *websocket.Conn) {
+	connectionsLock.Lock()
+	defer connectionsLock.Unlock()
+
+	if connectionsByRoom[roomID] != nil {
+		delete(connectionsByRoom[roomID], conn)
+		if len(connectionsByRoom[roomID]) == 0 {
+			delete(connectionsByRoom, roomID)
+		}
 	}
 }
 
 func insertChatMessage(message ChatMessage) error {
 	collection := mongoClient.Database("upbase_chatroom").Collection("test")
-	_, err := collection.InsertOne(nil, message)
+	_, err := collection.InsertOne(context.TODO(), message)
 	return err
 }
 
-func broadcastMessage(connections map[string]*websocket.Conn, roomID string, message ChatMessage) {
-	// Iterate over all connections in the room and send the message
-	for _, conn := range connections {
+func broadcastMessage(roomID string, message ChatMessage) {
+	connectionsLock.Lock()
+	defer connectionsLock.Unlock()
+
+	for conn := range connectionsByRoom[roomID] {
 		err := conn.WriteJSON(message)
 		if err != nil {
 			log.Println("Failed to send WebSocket message:", err)
