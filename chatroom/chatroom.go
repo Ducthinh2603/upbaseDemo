@@ -2,11 +2,11 @@ package chatroom
 
 import (
 	"context"
+	"database/sql"
 	"log"
+	"net/http"
 	"sync"
 	"time"
-	"database/sql"
-	"net/http"
 	db "upbase/database"
 
 	"github.com/gin-gonic/gin"
@@ -58,7 +58,6 @@ func HandleWebSocket(c *gin.Context) {
 	if !roomExists {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Room doesn't exist"})
 	}
-	log.Printf("Room: %s exists!\n", roomID)
 
 	// This is an attempt to solve "websocket: request origin not allowed by Upgrader.CheckOrigin"
 	upgrader.CheckOrigin = func(r *http.Request) bool {
@@ -73,7 +72,6 @@ func HandleWebSocket(c *gin.Context) {
 
 	// Register the WebSocket connection
 	registerConnection(roomID, conn)
-	log.Printf("After register connection: %v\n", connectionsByRoom)
 
 	defer func() {
 		// Clean up the WebSocket connection when the goroutine exits
@@ -86,7 +84,7 @@ func HandleWebSocket(c *gin.Context) {
 }
 
 func verifyRoomId(roomId, userID string) (bool, error) {
-	statement := "SELECT id, owner_id FROM upbase_chat_rooms WHERE owner_id = &1 AND id = &2"
+	statement := "SELECT id, owner_id FROM upbase_chat_rooms WHERE owner_id = $1 AND id = $2"
 	row := db.PgDb.QueryRow(statement, userID, roomId)
 
 	var chatRoom ChatRoom
@@ -106,12 +104,12 @@ func handleChat(conn *websocket.Conn, roomID, userID string) {
 		// var msg WebSocketMessage
 		// err := conn.ReadJSON(&msg)
 		
-		log.Printf("%s send: %s\n", conn.RemoteAddr(), "Hello World!")
 		msgType, msg, err := conn.ReadMessage()
 		if err != nil {
 			log.Println("Failed to read WebSocket message:", err)
 			break
 		}
+		log.Printf("%s send: %s\n", conn.RemoteAddr(), string(msg))
 
 		// Create a ChatMessage struct
 		chatMessage := ChatMessage{
@@ -123,6 +121,7 @@ func handleChat(conn *websocket.Conn, roomID, userID string) {
 
 		// Insert the message into the MongoDB collection
 		err = insertChatMessage(chatMessage)
+		log.Printf("Error: %v", err)
 		if err != nil {
 			log.Println("Failed to insert chat message:", err)
 			break

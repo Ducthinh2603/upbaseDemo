@@ -16,7 +16,7 @@ var (
 
 
 func init() {
-	connectToMongoDB()
+	MongoClient = connectToMongoDB()
 }
 
 func DisconnectMongoClient() {
@@ -24,20 +24,21 @@ func DisconnectMongoClient() {
 }
 
 
-func connectToMongoDB()  {
+func connectToMongoDB() *mongo.Client  {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	clientOptions := options.Client().ApplyURI("mongodb://localhost:27017")
-	MongoClient, err := mongo.Connect(ctx, clientOptions)
+	mongoClient, err := mongo.Connect(ctx, clientOptions)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// Ping the MongoDB server to verify the connection
-	err = MongoClient.Ping(ctx, nil)
+	err = mongoClient.Ping(ctx, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	log.Println("Connected to MongoDB")
+	return mongoClient
 }

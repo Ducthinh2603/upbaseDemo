@@ -23,6 +23,7 @@ func main() {
 
 	// WebSocket endpoint for chat
 	router.GET("/:roomID/:userID", chatroom.HandleWebSocket)
+	// router.GET("/echo", chatroom.HandleWebSocket)
 	router.LoadHTMLGlob("templates/*.html")
 	router.GET("/chatroom", func(c *gin.Context) {
 		c.HTML(http.StatusOK, "index.html", gin.H{})
@@ -33,7 +34,7 @@ func main() {
 	router.POST("/users/createChatroom", chatroom.CreateChatRoom)
 
 	// Start the server
-	if err := router.Run(":8080"); err != nil {
+	if err := router.Run(":8000"); err != nil {
 		log.Fatal(err)
 	}
 
