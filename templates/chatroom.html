@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Chat App</title>
+	<style>
+		.container {
+			max-width: 600px;
+			margin: 0 auto;
+			padding: 20px;
+		}
+
+		.message {
+			background-color: #f2f2f2;
+			border-radius: 5px;
+			padding: 10px;
+			margin-bottom: 10px;
+		}
+
+		.user-message {
+			background-color: #d9edff;
+			align-self: flex-start;
+		}
+
+		.other-user-message {
+			background-color: #f8f8f8;
+			align-self: flex-end;
+		}
+
+		.message-content {
+			margin: 0;
+		}
+
+		.message-input {
+			display: flex;
+			margin-top: 20px;
+		}
+
+		.message-input input[type="text"] {
+			flex: 1;
+			padding: 10px;
+			border-radius: 5px;
+			border: 1px solid #ccc;
+			margin-right: 10px;
+		}
+
+		.message-input button {
+			padding: 10px 20px;
+			border-radius: 5px;
+			border: none;
+			background-color: #4caf50;
+			color: white;
+			cursor: pointer;
+		}
+
+	</style>
+</head>
+<body>
+	<div class="container">
+		<h1>Chat App</h1>
+
+		<div id="chat-container"></div>
+
+		<div class="message-input">
+			<input type="text" id="input" placeholder="Type your message...">
+			<button onclick="sendMessage()">Send</button>
+		</div>
+	</div>
+
+	<script>
+		var chatContainer = document.getElementById('chat-container');
+		var input = document.getElementById('input');
+		var socket;
+		var userID;
+
+		function createMessageElement(content, isUserMessage) {
+			var messageElement = document.createElement('div');
+			messageElement.classList.add('message');
+			if (isUserMessage) {
+				messageElement.classList.add('user-message');
+			} else {
+				messageElement.classList.add('other-user-message');
+			}
+
+			var messageContent = document.createElement('p');
+			messageContent.classList.add('message-content');
+			messageContent.textContent = content;
+
+			messageElement.appendChild(messageContent);
+			return messageElement;
+		}
+
+		function extractRoomID() {
+			var pathArray = window.location.pathname.split('/');
+			var roomID = pathArray[pathArray.length - 1];
+			return roomID;
+		}
+
+		function connectToChat() {
+			var roomID = extractRoomID();
+            alert(roomID)
+
+			// Prompt for user ID
+			userID = prompt("Please enter your user ID:");
+			if (!userID) {
+				alert("User ID is required.");
+				return;
+			}
+
+			socket = new WebSocket("ws://localhost:8000/" + roomID);
+			socket.onopen = function() {
+				var connectedMessage = createMessageElement('Status: Connected', false);
+				chatContainer.appendChild(connectedMessage);
+			};
+
+			socket.onmessage = function(e) {
+				var messageData = JSON.parse(e.data);
+				var message = messageData.Message;
+				var sender = messageData.Sender;
+				var isUserMessage = sender === userID;
+                if (!isUserMessage) {
+                    var messageElement = createMessageElement(sender + ': ' + message, isUserMessage);
+                    var messageElement = createMessageElement(sender + ': ' + message, isUserMessage);
+                    var messageElement = createMessageElement(sender + ': ' + message, isUserMessage);
+				    chatContainer.appendChild(messageElement);
+                }
+			};
+		}
+
+		function sendMessage() {
+			var message = input.value;
+			if (message.trim() !== '') {
+				var messageData = {
+					message: message,
+					sender: userID
+				};
+
+				socket.send(JSON.stringify(messageData));
+				var userMessage = createMessageElement('You: ' + message, true);
+				chatContainer.appendChild(userMessage);
+
+				// Empty input
+				input.value = '';
+			}
+		}
+
+		connectToChat();
+	</script>
+</body>
+</html>

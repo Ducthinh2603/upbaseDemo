@@ -22,11 +22,12 @@ func main() {
 	router := gin.Default()
 
 	// WebSocket endpoint for chat
-	router.GET("/:roomID/:userID", chatroom.HandleWebSocket)
+	router.GET("/:roomID", chatroom.HandleWebSocket)
 	// router.GET("/echo", chatroom.HandleWebSocket)
 	router.LoadHTMLGlob("templates/*.html")
-	router.GET("/chatroom", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "index.html", gin.H{})
+	router.GET("/chatroom/:roomID", func(c *gin.Context) {
+		
+		c.HTML(http.StatusOK, "chatroom.html", gin.H{})
 	})
 	// User registration and login endpoints
 	router.POST("/users/register", user.RegisterUser)

@@ -3,6 +3,7 @@ package chatroom
 import (
 	"context"
 	"database/sql"
+	"io"
 	"log"
 	"net/http"
 	"sync"
@@ -32,7 +33,6 @@ type ChatRoom struct {
 
 // Define the WebSocket message struct
 type WebSocketMessage struct {
-	RoomID  string `json:"room_id"`
 	Sender  string `json:"sender"`
 	Message string `json:"message"`
 }
@@ -48,9 +48,25 @@ var (
 
 func HandleWebSocket(c *gin.Context) {
 	roomID := c.Param("roomID")
-	userID := c.Param("userID")
+
+	var requestBody struct {
+        UserID string `json:"user_id"`
+    }
+
+    // Bind the request body to the struct
+    if err := c.ShouldBindJSON(&requestBody); err != nil {
+		if err == io.EOF {
+			log.Println("Starting connection!")
+		} else {
+        // Handle the error, e.g., return an error response
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+    }
+	userID := requestBody.UserID
 	log.Printf("roomId: %s, userId: %s\n", roomID, userID)
-	roomExists, err := verifyRoomId(roomID, userID)
+	// roomExists, err := verifyRoomIdByUserId(roomID, userID)
+	roomExists, err := verifyRoomId(roomID)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
@@ -80,10 +96,10 @@ func HandleWebSocket(c *gin.Context) {
 	}()
 
 	// Create a new goroutine to handle the WebSocket connection
-	handleChat(conn, roomID, userID)
+	handleChat(conn, roomID)
 }
 
-func verifyRoomId(roomId, userID string) (bool, error) {
+func verifyRoomIdByUserId(roomId, userID string) (bool, error) {
 	statement := "SELECT id, owner_id FROM upbase_chat_rooms WHERE owner_id = $1 AND id = $2"
 	row := db.PgDb.QueryRow(statement, userID, roomId)
 
@@ -98,38 +114,51 @@ func verifyRoomId(roomId, userID string) (bool, error) {
 	return true, nil
 }
 
-func handleChat(conn *websocket.Conn, roomID, userID string) {
+func verifyRoomId(roomId string) (bool, error) {
+	statement := "SELECT id, owner_id FROM upbase_chat_rooms WHERE id = $1"
+	row := db.PgDb.QueryRow(statement, roomId)
+
+	var chatRoom ChatRoom
+	err := row.Scan(&chatRoom.ID, &chatRoom.Owner)
+	if err == sql.ErrNoRows {
+		return false, nil
+	} else if err != nil {
+		return false, err // Database error
+	}
+
+	return true, nil
+}
+
+func handleChat(conn *websocket.Conn, roomID string) {
 	// Read messages from the WebSocket connection
 	for {
-		// var msg WebSocketMessage
-		// err := conn.ReadJSON(&msg)
+		var msg WebSocketMessage
+		err := conn.ReadJSON(&msg)
 		
-		msgType, msg, err := conn.ReadMessage()
 		if err != nil {
 			log.Println("Failed to read WebSocket message:", err)
 			break
 		}
-		log.Printf("%s send: %s\n", conn.RemoteAddr(), string(msg))
+		log.Printf("%s send: %s\n", conn.RemoteAddr(), msg.Message)
 
 		// Create a ChatMessage struct
 		chatMessage := ChatMessage{
 			RoomID:    roomID,
-			Sender:    userID,
-			Message:   string(msg),
+			Sender:    msg.Sender,
+			Message:   msg.Message,
 			Timestamp: time.Now(),
 		}
 
 		// Insert the message into the MongoDB collection
 		err = insertChatMessage(chatMessage)
-		log.Printf("Error: %v", err)
 		if err != nil {
 			log.Println("Failed to insert chat message:", err)
 			break
 		}
 
 		// Broadcast the message to all connected clients in the same room
-		// broadcastMessage(roomID, chatMessage)
-		broadcastMessage(roomID, msg, msgType)
+		broadcastMessage(conn, roomID, chatMessage)
+		// broadcastMessage(roomID, msg, msgType)
 	}
 }
 
@@ -162,27 +191,27 @@ func insertChatMessage(message ChatMessage) error {
 	return err
 }
 
-// func broadcastMessage(roomID string, message ChatMessage) {
-// 	connectionsLock.Lock()
-// 	defer connectionsLock.Unlock()
-
-// 	for conn := range connectionsByRoom[roomID] {
-// 		err := conn.WriteJSON(message)
-// 		if err != nil {
-// 			log.Println("Failed to send WebSocket message:", err)
-// 		}
-// 	}
-// }
-
-
-func broadcastMessage(roomID string, message []byte, messageType int) {
+func broadcastMessage(c *websocket.Conn, roomID string, message ChatMessage) {
 	connectionsLock.Lock()
 	defer connectionsLock.Unlock()
 
 	for conn := range connectionsByRoom[roomID] {
-		err := conn.WriteMessage(messageType, message)
+		err := conn.WriteJSON(message)
 		if err != nil {
 			log.Println("Failed to send WebSocket message:", err)
 		}
 	}
 }
+
+
+// func broadcastMessage(roomID string, message []byte, messageType int) {
+// 	connectionsLock.Lock()
+// 	defer connectionsLock.Unlock()
+
+// 	for conn := range connectionsByRoom[roomID] {
+// 		err := conn.WriteMessage(messageType, message)
+// 		if err != nil {
+// 			log.Println("Failed to send WebSocket message:", err)
+// 		}
+// 	}
+// }
