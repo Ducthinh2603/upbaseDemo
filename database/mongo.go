@@ -1,4 +1,4 @@
-package chatroom
+package database
 
 import (
 	"log"
@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	mongoClient *mongo.Client
+	MongoClient *mongo.Client
 	ctx *context.Context
 )
 
@@ -20,7 +20,7 @@ func init() {
 }
 
 func DisconnectMongoClient() {
-	mongoClient.Disconnect(*ctx)
+	MongoClient.Disconnect(*ctx)
 }
 
 
@@ -28,13 +28,13 @@ func connectToMongoDB()  {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	clientOptions := options.Client().ApplyURI("mongodb://localhost:27017")
-	mongoClient, err := mongo.Connect(ctx, clientOptions)
+	MongoClient, err := mongo.Connect(ctx, clientOptions)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// Ping the MongoDB server to verify the connection
-	err = mongoClient.Ping(ctx, nil)
+	err = MongoClient.Ping(ctx, nil)
 	if err != nil {
 		log.Fatal(err)
 	}

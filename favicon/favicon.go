@@ -1,9 +1,7 @@
 package favicon
 
 import (
-	"bufio"
 	"bytes"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,33 +10,11 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	db "upbase/database"
 
 	"github.com/gorilla/mux"
-	_ "github.com/lib/pq"
 )
 
-var db *sql.DB
-var err error
-
-func init() {
-	db, err = sql.Open("postgres", GetDatabaseConfig())
-	if err != nil {
-		log.Fatal(err)
-	}
-	statement := ""
-	f, err := os.Open("favicon/init.sql")
-	if err != nil {
-		log.Fatal("Can't open entry point: ", err)
-	}
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		statement += scanner.Text() + "\n"
-	}
-	_, err = db.Exec(statement)
-	if err != nil {
-		log.Fatal("Can't initiate database: ", err)
-	}
-}
 
 type FaviconRequest struct {
 	Link string `json:"link"`
@@ -155,7 +131,7 @@ func saveImageToFile(domainName string, resp *http.Response) error {
 
 func saveImageToDB(domainName string, resp *http.Response) error {
 	var buffer bytes.Buffer
-	_, err = buffer.ReadFrom(resp.Body)
+	_, err := buffer.ReadFrom(resp.Body)
 	if err != nil {
 		log.Fatal("Can't read the image: ", err)
 		return err
@@ -163,7 +139,7 @@ func saveImageToDB(domainName string, resp *http.Response) error {
 
 	// Get the byte slice from the buffer
 	imageData := buffer.Bytes()
-	_, err = db.Exec("INSERT INTO favicon (domain_name, image_data) VALUES ($1, $2)", domainName, imageData)
+	_, err = db.PgDb.Exec("INSERT INTO favicon (domain_name, image_data) VALUES ($1, $2)", domainName, imageData)
 	if err != nil {
 		log.Fatal("Can't save the image to DB: ", err)
 		return err
@@ -242,7 +218,7 @@ func contructFaviconURL(domainName string, fileName string) string {
 
 func isFaviconDownloaded(domainName string) (bool, error) {
 	var name string
-	err := db.QueryRow("SELECT domain_name FROM favicon WHERE domain_name = $1", domainName).Scan(&name)
+	err := db.PgDb.QueryRow("SELECT domain_name FROM favicon WHERE domain_name = $1", domainName).Scan(&name)
 	if err != nil {
 		return false, err
 	}

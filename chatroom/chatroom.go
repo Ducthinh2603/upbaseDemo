@@ -5,6 +5,9 @@ import (
 	"log"
 	"sync"
 	"time"
+	"database/sql"
+	"net/http"
+	db "upbase/database"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -22,9 +25,8 @@ type ChatMessage struct {
 // Define the ChatRoom struct
 type ChatRoom struct {
 	ID        string   `bson:"_id,omitempty"`
-	Name      string   `bson:"name"`
 	Owner     string   `bson:"owner"`
-	Members   []string `bson:"members"`
+	Members   []string `bson:"members,omitempty"`
 	CreatedAt time.Time
 }
 
@@ -47,6 +49,21 @@ var (
 func HandleWebSocket(c *gin.Context) {
 	roomID := c.Param("roomID")
 	userID := c.Param("userID")
+	log.Printf("roomId: %s, userId: %s\n", roomID, userID)
+	roomExists, err := verifyRoomId(roomID, userID)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+	}
+	if !roomExists {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Room doesn't exist"})
+	}
+	log.Printf("Room: %s exists!\n", roomID)
+
+	// This is an attempt to solve "websocket: request origin not allowed by Upgrader.CheckOrigin"
+	upgrader.CheckOrigin = func(r *http.Request) bool {
+		return true
+	}
 
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
@@ -56,6 +73,7 @@ func HandleWebSocket(c *gin.Context) {
 
 	// Register the WebSocket connection
 	registerConnection(roomID, conn)
+	log.Printf("After register connection: %v\n", connectionsByRoom)
 
 	defer func() {
 		// Clean up the WebSocket connection when the goroutine exits
@@ -64,14 +82,32 @@ func HandleWebSocket(c *gin.Context) {
 	}()
 
 	// Create a new goroutine to handle the WebSocket connection
-	go handleChat(conn, roomID, userID)
+	handleChat(conn, roomID, userID)
+}
+
+func verifyRoomId(roomId, userID string) (bool, error) {
+	statement := "SELECT id, owner_id FROM upbase_chat_rooms WHERE owner_id = &1 AND id = &2"
+	row := db.PgDb.QueryRow(statement, userID, roomId)
+
+	var chatRoom ChatRoom
+	err := row.Scan(&chatRoom.ID, &chatRoom.Owner)
+	if err == sql.ErrNoRows {
+		return false, nil
+	} else if err != nil {
+		return false, err // Database error
+	}
+
+	return true, nil
 }
 
 func handleChat(conn *websocket.Conn, roomID, userID string) {
 	// Read messages from the WebSocket connection
 	for {
-		var msg WebSocketMessage
-		err := conn.ReadJSON(&msg)
+		// var msg WebSocketMessage
+		// err := conn.ReadJSON(&msg)
+		
+		log.Printf("%s send: %s\n", conn.RemoteAddr(), "Hello World!")
+		msgType, msg, err := conn.ReadMessage()
 		if err != nil {
 			log.Println("Failed to read WebSocket message:", err)
 			break
@@ -81,7 +117,7 @@ func handleChat(conn *websocket.Conn, roomID, userID string) {
 		chatMessage := ChatMessage{
 			RoomID:    roomID,
 			Sender:    userID,
-			Message:   msg.Message,
+			Message:   string(msg),
 			Timestamp: time.Now(),
 		}
 
@@ -93,7 +129,8 @@ func handleChat(conn *websocket.Conn, roomID, userID string) {
 		}
 
 		// Broadcast the message to all connected clients in the same room
-		broadcastMessage(roomID, chatMessage)
+		// broadcastMessage(roomID, chatMessage)
+		broadcastMessage(roomID, msg, msgType)
 	}
 }
 
@@ -121,20 +158,32 @@ func unregisterConnection(roomID string, conn *websocket.Conn) {
 }
 
 func insertChatMessage(message ChatMessage) error {
-	collection := mongoClient.Database("upbase_chatroom").Collection("test")
+	collection := db.MongoClient.Database("upbase_chatroom").Collection("test")
 	_, err := collection.InsertOne(context.TODO(), message)
 	return err
 }
 
-func broadcastMessage(roomID string, message ChatMessage) {
+// func broadcastMessage(roomID string, message ChatMessage) {
+// 	connectionsLock.Lock()
+// 	defer connectionsLock.Unlock()
+
+// 	for conn := range connectionsByRoom[roomID] {
+// 		err := conn.WriteJSON(message)
+// 		if err != nil {
+// 			log.Println("Failed to send WebSocket message:", err)
+// 		}
+// 	}
+// }
+
+
+func broadcastMessage(roomID string, message []byte, messageType int) {
 	connectionsLock.Lock()
 	defer connectionsLock.Unlock()
 
 	for conn := range connectionsByRoom[roomID] {
-		err := conn.WriteJSON(message)
+		err := conn.WriteMessage(messageType, message)
 		if err != nil {
 			log.Println("Failed to send WebSocket message:", err)
 		}
 	}
 }
-
